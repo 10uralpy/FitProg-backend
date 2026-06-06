@@ -365,87 +365,138 @@ app.post('/api/generate-program', async (req, res) => {
       return `${m} (${mg?.score || '?'}/100 - ${mg?.detail || ''})`;
     }).join(' | ');
 
-    const prompt = `You are an expert hypertrophy coach. Write a ${weeklyDays}-day training program in JSON.
+    // Split günlerini belirle
+    const dayPlans = [];
+    if (weeklyDays <= 3) {
+      for (let i = 0; i < weeklyDays; i++) {
+        dayPlans.push({ dayNum: i+1, name: 'Full Body', focus: selectedMuscles.join(', ') });
+      }
+    } else if (weeklyDays === 4) {
+      if (skipLegs) {
+        dayPlans.push({ dayNum: 1, name: 'Push', focus: 'göğüs, omuz, triceps' });
+        dayPlans.push({ dayNum: 2, name: 'Pull', focus: 'sırt, biceps' });
+        dayPlans.push({ dayNum: 3, name: 'Arms', focus: 'biceps, triceps' });
+        dayPlans.push({ dayNum: 4, name: 'Full Upper', focus: 'göğüs, sırt, omuz' });
+      } else {
+        dayPlans.push({ dayNum: 1, name: 'Upper A', focus: 'göğüs, omuz, triceps' });
+        dayPlans.push({ dayNum: 2, name: 'Lower A', focus: 'bacaklar, glutes' });
+        dayPlans.push({ dayNum: 3, name: 'Upper B', focus: 'sırt, biceps, omuz' });
+        dayPlans.push({ dayNum: 4, name: 'Lower B', focus: 'bacaklar, hamstrings' });
+      }
+    } else {
+      if (skipLegs) {
+        dayPlans.push({ dayNum: 1, name: 'Push A', focus: 'göğüs, omuz, triceps' });
+        dayPlans.push({ dayNum: 2, name: 'Pull A', focus: 'sırt, biceps' });
+        dayPlans.push({ dayNum: 3, name: 'Arms', focus: 'biceps, triceps' });
+        dayPlans.push({ dayNum: 4, name: 'Push B', focus: 'göğüs, üst göğüs, omuz' });
+        dayPlans.push({ dayNum: 5, name: 'Pull B', focus: 'sırt genişliği, sırt kalınlığı' });
+      } else {
+        dayPlans.push({ dayNum: 1, name: 'Push', focus: 'göğüs, omuz, triceps' });
+        dayPlans.push({ dayNum: 2, name: 'Pull', focus: 'sırt, biceps' });
+        dayPlans.push({ dayNum: 3, name: 'Legs', focus: 'bacaklar, glutes' });
+        dayPlans.push({ dayNum: 4, name: 'Push B', focus: 'üst göğüs, omuz' });
+        dayPlans.push({ dayNum: 5, name: 'Pull B', focus: 'sırt kalınlığı, biceps' });
+      }
+    }
+
+    // Kısıtlamalar — her güne gönderilecek
+    const restrictions = [
+      customNote ? `ÖZEL İSTEK: "${customNote}"` : '',
+      disliked ? `KULLANILMAYACAK HAREKETLER: ${disliked}` : '',
+      injuries ? `SAKATLИК NEDENİYLE KAÇIN: ${injuries}` : '',
+      skipLegs ? 'BACAK EGZERSİZİ KESİNLİKLE YASAK: squat, leg press, lunge, leg curl, leg extension, calf raise, deadlift' : '',
+      `EKİPMAN — SADECE BUNLARI KULLAN: ${availableEquipment.join(', ')}`,
+      onlyBodyweight ? 'Makine, dambıl, barbell kullanma.' : '',
+    ].filter(Boolean).join('\n');
+
+    const userContext = `Kullanıcı: ${experience} seviye, ${profile.primaryGoal || 'muscle'} hedefi, ${duration} dk antrenman
+Geliştirmek istediği kaslar: ${selectedMuscles.join(', ')}
+Kas skorları: ${muscleScores}
+Vücut tipi: ${analysis?.bodyPattern || 'beginner'}`;
+
+    // Her günü ayrı ayrı üret
+    const generatedDays = await Promise.all(dayPlans.slice(0, weeklyDays).map(async (dp) => {
+      const dayPrompt = `Sen deneyimli bir hypertrophy koçusun. Aşağıdaki antrenman günü için egzersiz listesi yaz.
 
 ══════════════════════════════════════
-KULLANICININ ÖZEL İSTEKLERİ — EN ÖNEMLİ KISIM, KESINLIKLE UYGULA:
-${customNote ? `"${customNote}"` : 'Özel istek yok.'}
-${disliked ? `Kullanılmayacak hareketler: ${disliked}` : ''}
-${injuries ? `Sakatlik/Ağrı nedeniyle kaçınılacaklar: ${injuries}` : ''}
-${skipLegs ? 'BACAK EGZERSİZİ YASAK: leg press, squat, lunge, leg curl, leg extension, calf raise, deadlift (bacak için) — hiçbirini koyma.' : ''}
+KURALLARIN TAMAMI — HEPSİNE UY:
+${restrictions}
 ══════════════════════════════════════
 
-KULLANICI PROFİLİ:
-- Deneyim: ${experience} | Hedef: ${profile.primaryGoal || 'muscle'} | Süre: ${duration} dk
-- Geliştirmek istediği kaslar (BUNLARA ODAKLAN): ${selectedMuscles.join(', ')}
-- Kas skoru detayları: ${priorityDetails}
-- Tüm kas skorları: ${muscleScores}
-- Vücut tipi: ${analysis?.bodyPattern || 'beginner'}
+${userContext}
 
-EKİPMAN — SADECE BUNLARI KULLAN:
-${availableEquipment.join(', ')}
-${onlyBodyweight ? 'Sadece vücut ağırlığı hareketleri kullan. Dambıl, makine, barbell yasak.' : ''}
+BU GÜN: Gün ${dp.dayNum} - ${dp.name}
+ODAK KASLAR: ${dp.focus}
+SÜRE: ${duration} dk
 
-SPLIT: ${split}
-${splitGuide}
+Bu günün odak kaslarına göre 6-8 egzersiz seç. Her egzersiz odak kasları çalıştırsın.
+Boş doldurmak için alakasız hareket koyma. Kalite önemli, sayı değil.
 
-KURALLAR:
-- PROGRAM array'inde tam ${weeklyDays} gün olacak
-- Her gün için yeteri kadar hareket ver — seçilen kaslara göre AI karar versin, boş doldurmak için gereksiz hareket koyma
-- Her hareketin "reason" alanında KAS SKORUNA referans ver: "Omuzun 48/100 olduğu için..."
-- Tüm string değerleri Türkçe
-
-JSON formatı:
+SADECE şu JSON'u döndür, başka hiçbir şey yazma:
 {
-  "focusMuscles": "${selectedMuscles.join(', ')}",
-  "splitType": "${split}",
-  "programContext": "2-3 cümle Türkçe: Bu program bu kişi için neden bu şekilde tasarlandı — kas skorlarına ve özel isteğe referans ver",
-  "weeklyVolume": "Türkçe haftalık set özeti",
-  "progressionNotes": "Türkçe ilerleme stratejisi",
-  "PROGRAM": [
+  "day": "Gün ${dp.dayNum} - ${dp.name}",
+  "focus": "${dp.focus}",
+  "dayContext": "Bu günün amacı 1 cümle Türkçe",
+  "duration": "${duration} dk",
+  "exercises": [
     {
-      "day": "Gün 1 - [isim]",
-      "focus": "[kaslar]",
-      "dayContext": "Bu günün amacı 1 cümle",
-      "duration": "${duration} dk",
-      "exercises": [
-        {
-          "name": "Exercise name",
-          "sets": "4",
-          "reps": "8-12",
-          "rest": "90 sn",
-          "intensity": "AĞIR",
-          "technique": "Teknik ipucu",
-          "reason": "Neden bu hareket — kas skoruna referans ver",
-          "alternatives": ["Alt 1", "Alt 2"],
-          "videoUrl": "https://youtube.com/results?search_query=exercise+name+tutorial"
-        }
-      ]
+      "name": "Egzersiz adı",
+      "sets": "4",
+      "reps": "8-12",
+      "rest": "90 sn",
+      "intensity": "AĞIR",
+      "technique": "Kısa teknik ipucu Türkçe",
+      "reason": "Neden bu hareket — kas skoruna referans ver Türkçe",
+      "alternatives": ["Alternatif 1", "Alternatif 2"],
+      "videoUrl": "https://youtube.com/results?search_query=exercise+name+tutorial"
     }
   ]
 }`;
 
-    const aiResponse = await openai.chat.completions.create({
+      const resp = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        max_tokens: 3000,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: 'JSON API. Return ONLY valid JSON. First char {, last char }. No markdown.' },
+          { role: 'user', content: dayPrompt }
+        ],
+      });
+
+      const raw = resp?.choices?.[0]?.message?.content;
+      const dayData = JSON.parse(extractJSON(raw));
+      console.log(`Gün ${dp.dayNum} (${dp.name}): ${dayData.exercises?.length || 0} hareket`);
+      return dayData;
+    }));
+
+    // Önce programContext üret
+    const ctxPrompt = `Aşağıdaki kullanıcı için kısa bir program tanıtımı yaz (2-3 cümle Türkçe).
+${userContext}
+Özel istek: ${customNote || 'yok'}
+JSON döndür: {"programContext":"...","weeklyVolume":"...","progressionNotes":"..."}`;
+
+    const ctxResp = await openai.chat.completions.create({
       model: 'gpt-4o',
-      max_tokens: 16000,
-      temperature: 0.2,
+      max_tokens: 400,
+      temperature: 0.3,
       messages: [
-        { role: 'system', content: 'You are a JSON API. Return ONLY valid JSON. No markdown. Strictly follow the user\'s custom requests at the top of the prompt — they are the highest priority.' },
-        { role: 'user', content: prompt }
+        { role: 'system', content: 'JSON API. Return ONLY valid JSON.' },
+        { role: 'user', content: ctxPrompt }
       ],
     });
+    const ctxRaw = ctxResp?.choices?.[0]?.message?.content;
+    const ctx = JSON.parse(extractJSON(ctxRaw));
 
-    const raw = aiResponse?.choices?.[0]?.message?.content;
-    if (!raw) return res.status(500).json({ success: false, error: 'AI yanit vermedi.' });
+    const program = {
+      focusMuscles: selectedMuscles.join(', '),
+      splitType: split,
+      programContext: ctx.programContext || '',
+      weeklyVolume: ctx.weeklyVolume || '',
+      progressionNotes: ctx.progressionNotes || '',
+      PROGRAM: generatedDays,
+    };
 
-    const program = JSON.parse(extractJSON(raw));
-
-    // Kontrol: her gün min 5 hareket
-    program.PROGRAM?.forEach((day, i) => {
-      console.log(`Gün ${i+1}: ${day.exercises?.length || 0} hareket`);
-    });
-
-    console.log('Program: ' + (program.PROGRAM?.length || 0) + ' gun');
+    console.log('Program tamam: ' + program.PROGRAM.length + ' gün');
     res.json({ success: true, data: program });
 
   } catch (err) {
