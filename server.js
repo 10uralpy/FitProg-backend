@@ -301,214 +301,126 @@ app.post('/api/generate-program', async (req, res) => {
 
     const weeklyDays = parseInt(programPrefs?.trainingDays) || parseInt(profile.weeklyDays) || 4;
     const experience = profile.experience || 'beginner';
-    const isAdvanced = experience === 'advanced';
-    const isBeginnerOrInter = experience === 'beginner' || experience === 'intermediate';
-
-    const split =
-      weeklyDays <= 3 ? 'Full Body' :
-      weeklyDays === 4 ? 'Upper / Lower Split' :
-      weeklyDays === 5 ? 'Push / Pull / Legs + 2 extras' :
-      'Push / Pull / Legs';
-
-    const equipment = programPrefs?.equipment?.length
-      ? programPrefs.equipment.join(', ')
-      : 'dumbbell, machine, cable';
-
     const duration = programPrefs?.sessionDuration || '60';
-    const disliked = programPrefs?.dislikedExercises?.trim() || 'none';
-    const injuries = programPrefs?.injuries?.trim() || profile?.injuries?.trim() || 'none';
+    const disliked = programPrefs?.dislikedExercises?.trim() || '';
+    const injuries = programPrefs?.injuries?.trim() || profile?.injuries?.trim() || '';
     const customNote = programPrefs?.customNote?.trim() || '';
 
-    // ── Analiz verisini detaylı hazırla ──────────────────
-    const bodyPattern = analysis?.bodyPattern || 'beginner';
-    const strategyPath = analysis?.strategyPath || 'recomp';
-    const bodyFat = analysis?.bodyFatEstimate || '?';
-    const overallScore = analysis?.overallScore || 50;
-    const vTaper = analysis?.aestheticRatios?.vTaperRating || 'fair';
-    const upperLowerBalance = analysis?.aestheticRatios?.upperLowerBalance || 'balanced';
+    // Ekipman listesi
+    const hasBarbell = programPrefs?.equipment?.includes('barbell') || !programPrefs?.equipment?.length;
+    const hasDumbbell = programPrefs?.equipment?.includes('dumbbell') || !programPrefs?.equipment?.length;
+    const hasMachine = programPrefs?.equipment?.includes('machine') || !programPrefs?.equipment?.length;
+    const hasCable = programPrefs?.equipment?.includes('cable') || !programPrefs?.equipment?.length;
+    const hasBands = programPrefs?.equipment?.includes('bands');
+    const hasBodyweight = programPrefs?.equipment?.includes('bodyweight');
+    const onlyBodyweight = hasBodyweight && !hasBarbell && !hasDumbbell && !hasMachine && !hasCable;
 
-    // Seçilen kasların tam analizi
-    const selectedMuscleDetails = selectedMuscles.map(m => {
-      const mg = analysis?.muscleGroups?.[m];
-      return `  ${m.toUpperCase()}: ${mg?.score || '?'}/100 (${mg?.status || '?'}) — ${mg?.detail || 'no detail available'}`;
-    }).join('\n');
+    const availableEquipment = [];
+    if (hasBarbell) availableEquipment.push('barbell');
+    if (hasDumbbell) availableEquipment.push('dumbbell');
+    if (hasMachine) availableEquipment.push('machine');
+    if (hasCable) availableEquipment.push('cable');
+    if (hasBands) availableEquipment.push('resistance bands');
+    if (hasBodyweight) availableEquipment.push('bodyweight');
 
-    // Tüm kas skorları sıralı (en düşükten en yükseğe)
-    const allScoresSorted = analysis?.muscleGroups
+    // Bacak atlama kontrolü
+    const skipLegs = disliked.toLowerCase().includes('bacak') ||
+                     disliked.toLowerCase().includes('leg') ||
+                     disliked.toLowerCase().includes('squat') && disliked.toLowerCase().includes('leg');
+
+    // Split mantığı
+    let split, splitGuide;
+    if (weeklyDays <= 3) {
+      split = 'Full Body';
+      splitGuide = 'Her gün tüm vücudu çalıştır: göğüs, sırt, omuz, kol, bacak (bacak isteniyorsa)';
+    } else if (weeklyDays === 4) {
+      if (skipLegs) {
+        split = 'Push / Pull / Arms / Full-Upper';
+        splitGuide = 'Gün 1: Push (göğüs+omuz+triceps) | Gün 2: Pull (sırt+biceps) | Gün 3: Arms (biceps+triceps odaklı) | Gün 4: Full Upper (göğüs+sırt+omuz)';
+      } else {
+        split = 'Upper / Lower';
+        splitGuide = 'Gün 1: Upper | Gün 2: Lower | Gün 3: Upper | Gün 4: Lower';
+      }
+    } else {
+      if (skipLegs) {
+        split = 'Push / Pull / Arms / Push / Pull';
+        splitGuide = 'Push / Pull / Arms / Push / Pull — bacak günü yok';
+      } else {
+        split = 'Push / Pull / Legs';
+        splitGuide = 'PPL split';
+      }
+    }
+
+    // Kas skoru özeti
+    const muscleScores = analysis?.muscleGroups
       ? Object.entries(analysis.muscleGroups)
           .filter(([, v]) => v?.score != null)
-          .sort((a, b) => (a[1].score || 99) - (b[1].score || 99))
-          .map(([k, v]) => `  ${k}: ${v.score}/100 (${v.status})`)
-          .join('\n')
-      : '  not available';
+          .map(([k, v]) => `${k}:${v.score}/100`)
+          .join(', ')
+      : '';
 
-    // Postur sorunları
-    const postureIssues = [];
-    if (analysis?.postureAnalysis?.roundedShoulders !== 'none') postureIssues.push(`rounded shoulders (${analysis.postureAnalysis.roundedShoulders})`);
-    if (analysis?.postureAnalysis?.forwardHead !== 'none') postureIssues.push(`forward head (${analysis.postureAnalysis.forwardHead})`);
-    if (analysis?.postureAnalysis?.pelvicTilt !== 'none') postureIssues.push(`pelvic tilt (${analysis.postureAnalysis.pelvicTilt})`);
-    const postureText = postureIssues.length ? postureIssues.join(', ') : 'none detected';
+    const priorityDetails = selectedMuscles.map(m => {
+      const mg = analysis?.muscleGroups?.[m];
+      return `${m} (${mg?.score || '?'}/100 - ${mg?.detail || ''})`;
+    }).join(' | ');
 
-    // Ekipman listesi
-    const exerciseList = [];
-    if (programPrefs?.equipment?.includes('barbell') || !programPrefs?.equipment?.length)
-      exerciseList.push('BARBELL: Barbell Bench Press, Barbell Row, Barbell Curl, Barbell Shoulder Press, Back Squat, Barbell Hip Thrust');
-    if (programPrefs?.equipment?.includes('dumbbell') || !programPrefs?.equipment?.length)
-      exerciseList.push('DUMBBELL: Dumbbell Bench Press, Incline Dumbbell Press, Dumbbell Fly, Dumbbell Shoulder Press, Dumbbell Lateral Raise, Dumbbell Front Raise, Dumbbell Curl, Hammer Curl, Romanian Deadlift, Goblet Squat, Dumbbell Row, Dumbbell Shrug');
-    if (programPrefs?.equipment?.includes('machine') || !programPrefs?.equipment?.length)
-      exerciseList.push('MACHINE: Chest Press Machine, Incline Machine Press, Leg Press, Leg Extension, Leg Curl, Shoulder Press Machine, Rear Delt Fly Machine, Ab Machine, Hip Thrust Machine, Glute Kickback Machine, Smith Machine Squat');
-    if (programPrefs?.equipment?.includes('cable') || !programPrefs?.equipment?.length)
-      exerciseList.push('CABLE: Cable Chest Fly, Low Cable Fly, Lat Pulldown, Close Grip Pulldown, Seated Cable Row, Cable Lateral Raise, Cable Front Raise, Cable Curl, Tricep Pushdown, Overhead Tricep Extension, Cable Crunch, Straight Arm Pulldown, Face Pull, Cable Kickback, Cable Pull Through');
-    if (programPrefs?.equipment?.includes('bands'))
-      exerciseList.push('BANDS: Band Pull-Apart, Band Lateral Walk, Band Curl, Band Tricep Extension');
-    if (programPrefs?.equipment?.includes('bodyweight'))
-      exerciseList.push('BODYWEIGHT: Push-up, Wide Push-up, Diamond Push-up, Incline Push-up, Decline Push-up, Pike Push-up (shoulders), Tricep Dips (use chair), Bodyweight Squat, Reverse Lunge, Step-up, Glute Bridge, Single Leg Glute Bridge, Plank, Side Plank, Mountain Climber, Hanging Leg Raise, Crunch, Bicycle Crunch, Superman, Bodyweight Row (use table), Inverted Row');
+    const prompt = `You are an expert hypertrophy coach. Write a ${weeklyDays}-day training program.
 
-    const prompt = `You are a world-class physique coach who writes programs that feel UNIQUELY tailored to each person.
-The user has just received their body analysis. Now create a training program that feels like a DIRECT RESPONSE to that analysis.
-Return ONLY valid JSON. No markdown.
+STRICT RULES — follow exactly:
+- EXACTLY ${weeklyDays} days in the PROGRAM array
+- EXACTLY 5-7 exercises per day, no exceptions. If equipment is limited, use variations (wide push-up, diamond push-up, pike push-up, etc.)
+- Equipment available: ${availableEquipment.join(', ')}. Use ONLY these. If only bodyweight: only bodyweight exercises.
+- ${skipLegs ? 'NO LEG EXERCISES AT ALL. No leg press, squat, lunge, leg curl, leg extension, calf raise. Zero.' : ''}
+- ${disliked ? `Never use: ${disliked}` : ''}
+- ${injuries ? `Avoid due to injury: ${injuries}` : ''}
+- Split: ${split} — ${splitGuide}
 
-━━━ WHO THIS PERSON IS ━━━
-Age: ${profile.age || 25} | Weight: ${profile.weight || 75}kg | Height: ${profile.height || 170}cm
-Gender: ${profile.gender === 'male' ? 'Male' : 'Female'} | Experience: ${experience}
-Goal: ${profile.primaryGoal === 'muscle' ? 'Muscle gain' : profile.primaryGoal === 'lose' ? 'Fat loss' : 'Stay fit'}
-Body Fat: ${bodyFat} | Overall Physique Score: ${overallScore}/100
-Body Pattern: ${bodyPattern} — THIS IS CRUCIAL. Let this define your entire approach.
-Strategy Path from analysis: ${strategyPath}
+USER:
+- Experience: ${experience} | Goal: ${profile.primaryGoal || 'muscle'} | Session: ${duration} min
+- Priority muscles: ${selectedMuscles.join(', ')}
+- Priority details: ${priorityDetails}
+- All scores: ${muscleScores}
+- Body pattern: ${analysis?.bodyPattern || 'beginner'}
+${customNote ? `- User request: ${customNote}` : ''}
 
-━━━ WHAT THEIR ANALYSIS REVEALED ━━━
-V-Taper Rating: ${vTaper} | Upper/Lower Balance: ${upperLowerBalance}
-Posture Issues: ${postureText}
-
-ALL MUSCLE SCORES (lowest = most underdeveloped):
-${allScoresSorted}
-
-━━━ MUSCLES THEY WANT TO PRIORITIZE ━━━
-${selectedMuscleDetails}
-
-━━━ TRAINING SETUP ━━━
-Weekly days: EXACTLY ${weeklyDays} | Session: ${duration} min | Split: ${split}
-Equipment: ${equipment}
-Disliked exercises: ${disliked}
-Injuries/Pain: ${injuries}
-Special requests: ${customNote || 'none'}
-
-━━━ BODY PATTERN PROGRAMMING GUIDE ━━━
-Based on body pattern "${bodyPattern}", here's how to approach this program:
-
-${bodyPattern === 'skinny_fat' ? `SKINNY FAT APPROACH:
-- Focus: body recomposition — build muscle without adding fat
-- Priority: compound movements for maximum muscle stimulus
-- Avoid: excessive isolation work early on
-- Cardio: 2x/week LISS — walk, bike, light jog (20-30 min) — do NOT add to program days but mention in notes
-- Volume: moderate (12-15 sets per muscle per week)
-- Rep ranges: 8-15 for hypertrophy and fat-burning stimulus` : ''}
-
-${bodyPattern === 'bulk_physique' ? `BULK PHYSIQUE APPROACH:
-- Focus: definition — maintain muscle while improving conditioning
-- Priority: supersets and circuits for metabolic stress
-- Keep compound movements heavy — protect muscle mass
-- Volume: slightly lower (10-12 sets per muscle) to allow fat burning
-- Rep ranges: 10-15 for metabolic demand
-- Cardio: recommend 2-3x HIIT weekly — add note in program` : ''}
-
-${bodyPattern === 'athletic_small' ? `ATHLETIC SMALL APPROACH:
-- Focus: mass building — progressive overload is everything
-- Priority: heavy compound movements with progressive loading
-- Volume: HIGH (16-20 sets per lagging muscle per week)
-- Rep ranges: 6-12, prioritize strength in 6-8 range for compounds
-- Add extra sets to ALL lagging muscles — no mercy on volume` : ''}
-
-${bodyPattern === 'aesthetic_lean' ? `AESTHETIC LEAN APPROACH:
-- Focus: muscle fullness and weak point development
-- Priority: targeted volume on lagging muscles, maintain strengths
-- Volume: focused (12-16 sets for weak points, 8-10 for strong)
-- Rep ranges: 8-15, pump-focused for detail work
-- Include stretch-focused exercises (cables, flyes)` : ''}
-
-${bodyPattern === 'beginner' ? `BEGINNER APPROACH:
-- Focus: movement quality first, then progressive overload
-- Priority: machine-dominant for safety and mind-muscle connection
-- Volume: moderate (10-12 sets per muscle per week)
-- Rep ranges: 10-15 to learn movements and build work capacity
-- Avoid: complex compound movements until form is established` : ''}
-
-${bodyPattern === 'advanced' ? `ADVANCED APPROACH:
-- Focus: intelligent specialization on lagging muscles
-- Priority: periodization — heavier compounds + targeted isolation
-- Volume: can handle high (16-20 sets for priority muscles)
-- Rep ranges: varied (6-8 heavy + 10-12 moderate + 15-20 pump)
-- Include: techniques like drop sets, rest-pause, supersets` : ''}
-
-${bodyPattern === 'unbalanced' ? `UNBALANCED APPROACH:
-- Focus: correcting the imbalance — lagging side gets MORE volume
-- Priority: isolateral exercises (dumbbell, unilateral cable)
-- Upper/Lower balance: ${upperLowerBalance === 'upper_dominant' ? 'ADD EXTRA LEG DAY — lower body is significantly behind' : upperLowerBalance === 'lower_dominant' ? 'ADD EXTRA UPPER BODY WORK — upper body is lagging' : 'balanced enough, focus on specific muscle imbalances'}
-- Volume: lagging muscles get 20-30% more sets than dominant ones
-- Rep ranges: 10-15 for lagging, 8-12 for dominant` : ''}
-
-━━━ CRITICAL PROGRAMMING RULES ━━━
-1. PROGRAM must have EXACTLY ${weeklyDays} days — non-negotiable
-2. Each day MUST have MINIMUM 5 exercises, MAXIMUM 7. If equipment is limited (bodyweight only), get creative — use push-up variations (wide, diamond, decline, pike), dip variations, plank variations, etc. NEVER give fewer than 5 exercises per day.
-3. ${isBeginnerOrInter ? 'BEGINNER/INTERMEDIATE: Machines and dumbbells first. No heavy barbell squat or deadlift unless requested.' : 'ADVANCED: Strategic barbell use. Quality over quantity.'}
-4. NEVER use exercises requiring unavailable equipment. If ONLY bodyweight selected, ONLY use bodyweight exercises — no dumbbells, no machines, no cables, no barbells.
-5. NEVER prescribe exercises that aggravate stated injuries
-6. LEG SKIP RULE — CRITICAL: User said they do NOT want leg training: "${disliked}". If legs/bacak is in disliked: DO NOT include ANY leg exercises (no leg press, no squat, no lunge, no leg curl, no calf raise). Replace leg days with: extra upper body day, arm specialization day, or full body upper. Restructure the split completely to avoid legs.
-7. SPLIT RESTRUCTURE when legs are skipped: Instead of Upper/Lower, use Push/Pull/Arms/Full-Upper or similar. Create ${weeklyDays} days that make sense WITHOUT legs.
-8. If posture issues exist (${postureText}): include corrective exercises
-9. "reason" field: MUST reference actual analysis data
-10. Set/rep: muscle gain = 3-4x8-12 | fat loss = 3-4x12-15 | strength = 4-5x5-8
-11. BODYWEIGHT ONLY — if equipment is ONLY bodyweight, here's how to fill 5-7 exercises per day:
-    - Push day: Push-up, Wide Push-up, Diamond Push-up, Decline Push-up, Pike Push-up, Tricep Dips, Plank
-    - Pull day: Bodyweight Row (table), Inverted Row, Superman, Reverse Snow Angel, Face Pull (band if available)
-    - Legs (if wanted): Bodyweight Squat, Lunge, Glute Bridge, Single Leg Glute Bridge, Step-up, Mountain Climber
-    - Core: Plank, Side Plank, Mountain Climber, Crunch, Bicycle Crunch, Hanging Leg Raise
-
-━━━ EXERCISE LIST (ONLY USE THESE) ━━━
-${exerciseList.join('\n')}
-
-Return this JSON:
+Return ONLY this JSON, no markdown:
 {
   "focusMuscles": "${selectedMuscles.join(', ')}",
   "splitType": "${split}",
-  "bodyPatternApproach": "${bodyPattern}",
-  "programContext": "<2-3 Türkçe cümle: Bu programın NEDEN bu kişi için bu şekilde tasarlandığını açıkla — vücut analizi bulgularına direkt referans ver. Örnek: 'Analizinde V-taper oranın fair seviyede, omuzların 48/100 skoruyla zayıf görünüyor. Bu program öncelikli olarak lateral deltoid hacmini ve üst göğüs gelişimini hedefliyor çünkü bu iki alan görsel olarak seni en çok atletik yapacak noktalardır.'>",
-  "weeklyVolume": "<Türkçe haftalık set özeti — hangi kas grubuna kaç set, neden>",
-  "progressionNotes": "<Türkçe ilerleme stratejisi — spesifik ve kişisel>",
+  "programContext": "2-3 cümle Türkçe: Bu program neden bu kişi için bu şekilde tasarlandı",
+  "weeklyVolume": "Türkçe haftalık set özeti",
+  "progressionNotes": "Türkçe ilerleme stratejisi",
   "PROGRAM": [
     {
-      "day": "Gün 1 - [Kas Grubu]",
-      "focus": "[Ana kas grupları]",
-      "dayContext": "<1 Türkçe cümle: Bu günün amacı — analizle bağlantılı>",
+      "day": "Gün 1 - [isim]",
+      "focus": "[kaslar]",
+      "dayContext": "Bu günün amacı",
       "duration": "${duration} dk",
       "exercises": [
         {
-          "name": "Exercise Name",
+          "name": "Exercise name",
           "sets": "4",
           "reps": "8-12",
           "rest": "90 sn",
           "intensity": "AĞIR",
-          "technique": "<Türkçe teknik ipucu — spesifik>",
-          "reason": "<Türkçe — MUST reference actual score or analysis finding>",
-          "alternatives": ["Alternative 1", "Alternative 2"],
-          "videoUrl": "https://youtube.com/results?search_query=exercise+name+form+tutorial"
+          "technique": "Teknik ipucu",
+          "reason": "Neden bu hareket — skorlara referans ver",
+          "alternatives": ["Alt 1", "Alt 2"],
+          "videoUrl": "https://youtube.com/results?search_query=exercise+name+tutorial"
         }
       ]
     }
   ]
 }
 
-FINAL CHECK before responding:
-- Does PROGRAM have exactly ${weeklyDays} days? If not, fix it.
-- Does each exercise's "reason" reference actual analysis data? If not, rewrite it.
-- Does the program feel specifically designed for a ${bodyPattern} body type with ${vTaper} V-taper? If not, adjust it.`;
+BEFORE SUBMITTING: Count exercises in each day. Every day must have 5-7. If any day has fewer than 5, add more exercises before responding.`;
 
     const aiResponse = await openai.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 16000,
       temperature: 0.2,
       messages: [
-        { role: 'system', content: 'You are a JSON API. Return ONLY valid JSON. First char {, last char }. No markdown.' },
+        { role: 'system', content: 'You are a JSON API. Return ONLY valid JSON. No markdown. Every day in PROGRAM must have 5-7 exercises.' },
         { role: 'user', content: prompt }
       ],
     });
@@ -517,7 +429,13 @@ FINAL CHECK before responding:
     if (!raw) return res.status(500).json({ success: false, error: 'AI yanit vermedi.' });
 
     const program = JSON.parse(extractJSON(raw));
-    console.log('Program olusturuldu - ' + (program.PROGRAM?.length || 0) + ' gun, pattern: ' + program.bodyPatternApproach);
+
+    // Kontrol: her gün min 5 hareket
+    program.PROGRAM?.forEach((day, i) => {
+      console.log(`Gün ${i+1}: ${day.exercises?.length || 0} hareket`);
+    });
+
+    console.log('Program: ' + (program.PROGRAM?.length || 0) + ' gun');
     res.json({ success: true, data: program });
 
   } catch (err) {
