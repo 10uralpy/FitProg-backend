@@ -323,10 +323,11 @@ app.post('/api/generate-program', async (req, res) => {
     if (hasBands) availableEquipment.push('resistance bands');
     if (hasBodyweight) availableEquipment.push('bodyweight');
 
-    // Bacak atlama kontrolü
-    const skipLegs = disliked.toLowerCase().includes('bacak') ||
-                     disliked.toLowerCase().includes('leg') ||
-                     disliked.toLowerCase().includes('squat') && disliked.toLowerCase().includes('leg');
+    // Bacak atlama kontrolü — geniş yakalama
+    const skipLegsKeywords = ['bacak', 'leg', 'lower body', 'alt vücut', 'alt vucut', 'squat', 'bacaklar'];
+    const allUserText = (disliked + ' ' + customNote).toLowerCase();
+    const skipLegs = skipLegsKeywords.some(k => allUserText.includes(k)) ||
+                     selectedMuscles.every(m => !['legs', 'glutes'].includes(m)) && !selectedMuscles.includes('legs');
 
     // Split mantığı
     let split, splitGuide;
@@ -364,37 +365,48 @@ app.post('/api/generate-program', async (req, res) => {
       return `${m} (${mg?.score || '?'}/100 - ${mg?.detail || ''})`;
     }).join(' | ');
 
-    const prompt = `You are an expert hypertrophy coach. Write a ${weeklyDays}-day training program.
+    const prompt = `You are an expert hypertrophy coach. Write a ${weeklyDays}-day training program in JSON.
 
-STRICT RULES — follow exactly:
-- EXACTLY ${weeklyDays} days in the PROGRAM array
-- EXACTLY 5-7 exercises per day, no exceptions. If equipment is limited, use variations (wide push-up, diamond push-up, pike push-up, etc.)
-- Equipment available: ${availableEquipment.join(', ')}. Use ONLY these. If only bodyweight: only bodyweight exercises.
-- ${skipLegs ? 'NO LEG EXERCISES AT ALL. No leg press, squat, lunge, leg curl, leg extension, calf raise. Zero.' : ''}
-- ${disliked ? `Never use: ${disliked}` : ''}
-- ${injuries ? `Avoid due to injury: ${injuries}` : ''}
-- Split: ${split} — ${splitGuide}
+══════════════════════════════════════
+KULLANICININ ÖZEL İSTEKLERİ — EN ÖNEMLİ KISIM, KESINLIKLE UYGULA:
+${customNote ? `"${customNote}"` : 'Özel istek yok.'}
+${disliked ? `Kullanılmayacak hareketler: ${disliked}` : ''}
+${injuries ? `Sakatlik/Ağrı nedeniyle kaçınılacaklar: ${injuries}` : ''}
+${skipLegs ? 'BACAK EGZERSİZİ YASAK: leg press, squat, lunge, leg curl, leg extension, calf raise, deadlift (bacak için) — hiçbirini koyma.' : ''}
+══════════════════════════════════════
 
-USER:
-- Experience: ${experience} | Goal: ${profile.primaryGoal || 'muscle'} | Session: ${duration} min
-- Priority muscles: ${selectedMuscles.join(', ')}
-- Priority details: ${priorityDetails}
-- All scores: ${muscleScores}
-- Body pattern: ${analysis?.bodyPattern || 'beginner'}
-${customNote ? `- User request: ${customNote}` : ''}
+KULLANICI PROFİLİ:
+- Deneyim: ${experience} | Hedef: ${profile.primaryGoal || 'muscle'} | Süre: ${duration} dk
+- Geliştirmek istediği kaslar (BUNLARA ODAKLAN): ${selectedMuscles.join(', ')}
+- Kas skoru detayları: ${priorityDetails}
+- Tüm kas skorları: ${muscleScores}
+- Vücut tipi: ${analysis?.bodyPattern || 'beginner'}
 
-Return ONLY this JSON, no markdown:
+EKİPMAN — SADECE BUNLARI KULLAN:
+${availableEquipment.join(', ')}
+${onlyBodyweight ? 'Sadece vücut ağırlığı hareketleri kullan. Dambıl, makine, barbell yasak.' : ''}
+
+SPLIT: ${split}
+${splitGuide}
+
+KURALLAR:
+- PROGRAM array'inde tam ${weeklyDays} gün olacak
+- Her gün için yeteri kadar hareket ver — seçilen kaslara göre AI karar versin, boş doldurmak için gereksiz hareket koyma
+- Her hareketin "reason" alanında KAS SKORUNA referans ver: "Omuzun 48/100 olduğu için..."
+- Tüm string değerleri Türkçe
+
+JSON formatı:
 {
   "focusMuscles": "${selectedMuscles.join(', ')}",
   "splitType": "${split}",
-  "programContext": "2-3 cümle Türkçe: Bu program neden bu kişi için bu şekilde tasarlandı",
+  "programContext": "2-3 cümle Türkçe: Bu program bu kişi için neden bu şekilde tasarlandı — kas skorlarına ve özel isteğe referans ver",
   "weeklyVolume": "Türkçe haftalık set özeti",
   "progressionNotes": "Türkçe ilerleme stratejisi",
   "PROGRAM": [
     {
       "day": "Gün 1 - [isim]",
       "focus": "[kaslar]",
-      "dayContext": "Bu günün amacı",
+      "dayContext": "Bu günün amacı 1 cümle",
       "duration": "${duration} dk",
       "exercises": [
         {
@@ -404,23 +416,21 @@ Return ONLY this JSON, no markdown:
           "rest": "90 sn",
           "intensity": "AĞIR",
           "technique": "Teknik ipucu",
-          "reason": "Neden bu hareket — skorlara referans ver",
+          "reason": "Neden bu hareket — kas skoruna referans ver",
           "alternatives": ["Alt 1", "Alt 2"],
           "videoUrl": "https://youtube.com/results?search_query=exercise+name+tutorial"
         }
       ]
     }
   ]
-}
-
-BEFORE SUBMITTING: Count exercises in each day. Every day must have 5-7. If any day has fewer than 5, add more exercises before responding.`;
+}`;
 
     const aiResponse = await openai.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 16000,
       temperature: 0.2,
       messages: [
-        { role: 'system', content: 'You are a JSON API. Return ONLY valid JSON. No markdown. Every day in PROGRAM must have 5-7 exercises.' },
+        { role: 'system', content: 'You are a JSON API. Return ONLY valid JSON. No markdown. Strictly follow the user\'s custom requests at the top of the prompt — they are the highest priority.' },
         { role: 'user', content: prompt }
       ],
     });
