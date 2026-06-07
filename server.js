@@ -96,13 +96,13 @@ Experience: ${profile.experience || 'beginner'} | Goal: ${goalLabel}
 Injuries: ${profile.injuries || 'none'}
 
 ━━━ SCORING SYSTEM ━━━
-Score each muscle group based on VISIBLE development, symmetry, and aesthetic contribution.
+Score each muscle group based on VISIBLE development AND the user's POSE (flexed = you can see actual muscle development).
 Use this scale:
-- 0-30 = Başlangıç (undeveloped, no gym history visible)
-- 31-45 = Ortalama Altı (some training but significant gaps)
-- 46-60 = Gelişiyor (clear gym history, room to grow — this is NORMAL for recreational lifters)
-- 61-75 = Fit / Atletik (solid development, above average)
-- 76-88 = Çok İyi (advanced development, notable aesthetics)
+- 0-30 = Başlangıç (no visible gym history, undeveloped)
+- 31-45 = Gelişiyor (some training visible but significant gaps)
+- 46-60 = Ortalama (clear gym history, decent development — NORMAL for recreational lifters)
+- 61-75 = Atletik (solid above-average development)
+- 76-88 = Çok İyi (advanced, notable aesthetics)
 - 89-100 = Elite (competition-level, exceptional)
 
 IMPORTANT SCORING RULES:
@@ -110,8 +110,9 @@ IMPORTANT SCORING RULES:
 - Do NOT score relative to Instagram influencers or bodybuilders
 - Score relative to the general gym-going population
 - Give DIFFERENT scores for each muscle — no two identical scores
-- null only if body part is completely not visible
+- If body part is NOT VISIBLE in photos: set score to null, status to "not_visible" — DO NOT GUESS
 - Only REJECT if: completely dark / no human visible / corrupted
+- If user is FLEXED/POSING: you can assess actual muscle development more accurately
 
 ━━━ BODY PATTERN DETECTION ━━━
 Before scoring, identify which body pattern fits this person:
