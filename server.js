@@ -433,6 +433,13 @@ SÜRE: ${duration} dk
 Bu günün odak kaslarına göre 6-8 egzersiz seç. Her egzersiz odak kasları çalıştırsın.
 Boş doldurmak için alakasız hareket koyma. Kalite önemli, sayı değil.
 
+SIRALAMA KURALI — ÇOK ÖNEMLİ:
+Egzersizleri kas grubuna göre GRUPLA. Aynı kas grubundaki TÜM hareketler birbirini takip etmeli.
+YANLIŞ sıralama: Göğüs, Omuz, Kol, Kol, Göğüs, Omuz (karışık)
+DOĞRU sıralama: Göğüs, Göğüs, Omuz, Omuz, Kol, Kol (gruplu)
+Önce en büyük/öncelikli kas grubunun TÜM hareketlerini sırala, sonra ikinci kas grubuna geç, sonra üçüncüye.
+Kullanıcı bu listeyi yukarıdan aşağı sırayla yapacak, kas grupları karışık gelirse antrenman mantıksız hissettirir.
+
 SADECE şu JSON'u döndür, başka hiçbir şey yazma:
 {
   "day": "Gün ${dp.dayNum} - ${dp.name}",
