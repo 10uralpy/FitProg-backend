@@ -638,10 +638,10 @@ app.post('/api/calorie-goal', (req, res) => {
 // AI KOÇ SOHBETİ
 // ─────────────────────────────────────────────────────
 app.post('/api/coach-chat', async (req, res) => {
-  req.socket.setTimeout(60000);
-  res.setTimeout(60000);
+  req.socket.setTimeout(90000);
+  res.setTimeout(90000);
   try {
-    const { message, chatHistory, profile, analysis, activeProgram, todayLog, weeklyLog } = req.body;
+    const { message, chatHistory, profile, analysis, activeProgram, todayLog, weeklyLog, recentWorkouts, recentProgress } = req.body;
 
     if (!message?.trim()) {
       return res.status(400).json({ success: false, error: 'Mesaj bos olamaz' });
@@ -650,39 +650,135 @@ app.post('/api/coach-chat', async (req, res) => {
     // Program ozeti
     let programSummary = 'Henuz program olusturulmamis.';
     if (activeProgram?.PROGRAM?.length) {
-      const days = activeProgram.PROGRAM.map((d, i) => `Gun ${i+1}: ${d.day} (${d.exercises?.length || 0} egzersiz)`).join('\n');
-      programSummary = `Split: ${activeProgram.splitType || '?'}\n${days}\nOdak kaslar: ${activeProgram.focusMuscles || '?'}`;
+      const days = activeProgram.PROGRAM.map((d, i) => {
+        const exNames = d.exercises?.map(e => e.name).join(', ') || '';
+        return `Gun ${i+1}: ${d.day} — ${exNames}`;
+      }).join('\n');
+      programSummary = `Split: ${activeProgram.splitType || '?'}\n${days}\nOdak: ${activeProgram.focusMuscles || '?'}`;
     }
 
-    // Bugunku kalori ozeti
+    // Kalori ozeti
     let nutritionSummary = 'Bugun kalori kaydi yok.';
     if (todayLog?.length) {
       const totalCal = todayLog.reduce((s, m) => s + (m.totalCalories || 0), 0);
       const totalPro = todayLog.reduce((s, m) => s + (m.totalProtein || 0), 0);
-      const meals = todayLog.map(m => `- ${m.mealName}: ${m.totalCalories} kcal`).join('\n');
-      nutritionSummary = `Bugun toplam: ${totalCal} kcal, ${Math.round(totalPro)}g protein\nOgunler:\n${meals}`;
+      const totalCarb = todayLog.reduce((s, m) => s + (m.totalCarbs || 0), 0);
+      const totalFat = todayLog.reduce((s, m) => s + (m.totalFat || 0), 0);
+      const meals = todayLog.map(m => `- ${m.mealName}: ${m.totalCalories} kcal, ${Math.round(m.totalProtein||0)}g protein`).join('\n');
+      nutritionSummary = `Bugun: ${totalCal} kcal | ${Math.round(totalPro)}g protein | ${Math.round(totalCarb)}g karb | ${Math.round(totalFat)}g yag\n${meals}`;
     }
-
-    // Haftalik kalori ozeti
     let weeklyNutrition = '';
     if (weeklyLog?.length) {
       const avgCal = Math.round(weeklyLog.reduce((s, m) => s + (m.totalCalories || 0), 0) / 7);
-      weeklyNutrition = `Bu hafta gunluk ortalama: ${avgCal} kcal`;
+      const avgPro = Math.round(weeklyLog.reduce((s, m) => s + (m.totalProtein || 0), 0) / 7);
+      weeklyNutrition = `Haftalik ortalama: ${avgCal} kcal/gun, ${avgPro}g protein/gun`;
     }
 
     // Analiz ozeti
-    let analysisSummary = 'Henuz vucut analizi yapilmamis.';
+    let analysisSummary = 'Henuz analiz yapilmamis.';
     if (analysis) {
       const muscles = analysis.muscleGroups
         ? Object.entries(analysis.muscleGroups)
-            .filter(([, v]) => v?.score)
-            .map(([k, v]) => `${k}: ${v.score}/100 (${v.status})`)
-            .join(', ')
+            .filter(([,v]) => v?.score != null)
+            .sort((a,b) => (a[1].score||99)-(b[1].score||99))
+            .map(([k,v]) => `${k}: ${v.score}/100 — ${v.detail || v.status}`)
+            .join('\n')
         : '';
-      analysisSummary = `Genel skor: ${analysis.overallScore}/100\nVucut yagi: ${analysis.bodyFatEstimate || '?'}\nKas gruplari: ${muscles}\nZayif noktalar: ${(analysis.weakPoints || []).join(', ')}\nGuclu noktalar: ${(analysis.strongPoints || []).join(', ')}`;
+      analysisSummary = `Genel: ${analysis.overallScore}/100 | Yag: ${analysis.bodyFatEstimate||'?'} | Pattern: ${analysis.bodyPattern||'?'} | V-taper: ${analysis.aestheticRatios?.vTaperRating||'?'}\nKas gruplari:\n${muscles}\nZayif: ${(analysis.weakPoints||[]).join(', ')} | Guclu: ${(analysis.strongPoints||[]).join(', ')}`;
     }
 
-    const systemPrompt = `Sen "KOMUTAN" — FitProg'un sert, disiplinli AI kocusun. Eski bir askeri antrenor gibisin. Tatli sozlerle vakit kaybetmezsin. Net, kisa, keskin konusursun.\n\nKISILIGIN:\n- Sert ama adil. Mazeret kabul etmezsin ama gercek caba gorduğunde takdir edersin.\n- "Belki", "sanirim", "deneyebilirsin" gibi yumusak ifadeler kullanmazsin. Net konusursun: "Yapacaksin", "Bu bahane degil", "Devam et".\n- Kisa ve vurucu cumleler kur. 2-4 cumle yeterli, gevezelik yapmazsin.\n- Disiplin, tutarlilik ve sifir bahane felsefen var.\n- Kullanici tembellik veya bahane belirtirse onu sertce ama yikici olmadan uyarirsin.\n- Kullanici gercekten caba gosterdiğinde ("bugun antrenman yaptim", "kaloriyi tuttum" gibi) onu sert ama gurur duyan bir tonla onaylarsin — "Iste bu. Devam." gibi.\n- Asla kufur etmezsin, asla asagilamazsin. Sert ama saygilisin. Disiplin kocusun, zorba degilsin.\n- Emir kipi kullanmaktan cekinme: "Bugun antrenmanini atlama.", "Kaloriyi gir, mazeret yok."\n\nKONUSMA ORNEKLERI (bu tarzda yaz):\n- "Omuz skorun 45. Bu yetersiz ama duzeltilebilir. Lateral raise hacmini artir, sikayet etme, uygula."\n- "Bugun antrenman gunun ve henuz log girmemissin. Saatler geciyor. Ne bekliyorsun?"\n- "Kaloriyi tuttun, protein hedefini gectin. Iste bu disiplin. Aynen devam."\n- "Motivasyon beklemeyi kes. Motivasyon gelmez, sen onu yaratirsin. Simdi kalk ve antrenmana git."\n\nKULLANICININ TUM VERILERINE ERISIMIN VAR — bunlari aktif kullan, generic konusma:\n\nKULLANICI PROFILI:\nYas: ${profile?.age || '?'} | Kilo: ${profile?.weight || '?'}kg | Boy: ${profile?.height || '?'}cm\nCinsiyet: ${profile?.gender === 'male' ? 'Erkek' : 'Kadin'}\nHedef: ${profile?.primaryGoal === 'muscle' ? 'Kas kazanma' : profile?.primaryGoal === 'lose' ? 'Yag yakma' : 'Formda kalma'}\nDeneyim: ${profile?.experience || '?'} | Antrenman: haftada ${profile?.weeklyDays || 4} gun\n\nSON ANALIZ:\n${analysisSummary}\n\nANTRENMAN PROGRAMI:\n${programSummary}\n\nBUGUNUN BESLENMESI:\n${nutritionSummary}\n${weeklyNutrition}\n\nKURALLAR:\n- Tibbi tavsiye verme\n- Kullanicinin gercek verilerini referans gostererek konus (gogus skoru 45, bu yuzden... gibi) — generic konusma yasak\n- Program varsa hangi gun oldugunu ve ne yapmasi gerektigini emir kipiyle soyle\n- Kalori hedefine gore net beslenme talimati ver\n- Sert ol ama asla kufur etme, asla asagilama — disiplin kocusun, zorba degilsin\n- Gercek caba gorduğunde takdir et, ama abartma`;
+    // Antrenman gecmisi + plato tespiti
+    let workoutSummary = 'Antrenman gecmisi yok.';
+    let plateauWarnings = '';
+    if (recentWorkouts?.length) {
+      workoutSummary = recentWorkouts.slice(0,5).map(w =>
+        `${w.date}: ${w.exercises?.map(e => {
+          const maxW = Math.max(...(e.sets?.map(s=>parseFloat(s.weight)||0)||[0]));
+          return `${e.name}${maxW>0?' '+maxW+'kg':''}x${e.sets?.length||0}set`;
+        }).join(', ')}`
+      ).join('\n');
+
+      const exWeights = {};
+      recentWorkouts.forEach(w => {
+        w.exercises?.forEach(ex => {
+          if (!exWeights[ex.name]) exWeights[ex.name] = [];
+          const maxW = Math.max(...(ex.sets?.map(s=>parseFloat(s.weight)||0)||[0]));
+          if (maxW > 0) exWeights[ex.name].push(maxW);
+        });
+      });
+      const plateaus = Object.entries(exWeights)
+        .filter(([,ws]) => ws.length >= 3 && new Set(ws.slice(-3)).size === 1)
+        .map(([name,ws]) => `${name}: son 3 antrenmanda ${ws[0]}kg`);
+      if (plateaus.length) {
+        plateauWarnings = `PLATO TESPIT EDILDI:\n${plateaus.join('\n')}\nBu hareketlerde ilerleme durmus. Kullaniciya mutlaka belirt ve somut cozumler oner.`;
+      }
+    }
+
+    // Ilerleme ozeti
+    let progressSummary = 'Olcum gecmisi yok.';
+    if (recentProgress?.length) {
+      const latest = recentProgress[0];
+      const prev = recentProgress[1];
+      const fields = ['weight','chest','waist','hips','arms','legs'];
+      const latestStr = fields.filter(f=>latest[f]).map(f=>`${f}:${latest[f]}`).join(', ');
+      progressSummary = `Son olcum (${latest.date}): ${latestStr}`;
+      if (prev) {
+        const diffs = fields.filter(f=>latest[f]&&prev[f]).map(f=>{
+          const d = parseFloat(latest[f])-parseFloat(prev[f]);
+          return `${f}:${d>0?'+':''}${d.toFixed(1)}`;
+        }).join(', ');
+        if (diffs) progressSummary += `\nDegisim: ${diffs}`;
+      }
+    }
+
+    const wantsExerciseChange = ['hareketi degistir','sevmiyorum','yapamiyorum','yerine koy','alternatif ver','baska hareket']
+      .some(kw => message.toLowerCase().includes(kw));
+
+    const systemPrompt = `Sen FitProg'un AI fitness kocusun. Deneyimli, bilgili ve samimi bir antrenor gibisin.
+
+KISILIK:
+- Samimi ve icten, gercekten konuyu bilen biri gibi konusursun
+- Teknik kavramlari dogal kullan: superset, drop set, RPE, progressive overload, mind-muscle connection, time under tension, deload, hipertrofi, RIR, mekanik gerilim, metabolik stres, periodizasyon
+- Her cevabin kullanicinin gercek verisiyle baglantili, somut ve bilgiye dayali
+- Kisa sohbetlerde 2-4 cumle. Teknik sorularda daha detayli ve ogretici ol
+- Turkce konus, dogal ve akici
+
+${plateauWarnings ? `DIKKAT — PLATO DURUMU:\n${plateauWarnings}\n` : ''}
+
+KULLANICI:
+Yas: ${profile?.age||'?'} | Kilo: ${profile?.weight||'?'}kg | Boy: ${profile?.height||'?'}cm | Cinsiyet: ${profile?.gender==='male'?'Erkek':'Kadin'}
+Hedef: ${profile?.primaryGoal==='muscle'?'Kas kazanma':profile?.primaryGoal==='lose'?'Yag yakma':'Formda kalma'} | Deneyim: ${profile?.experience||'?'} | ${profile?.weeklyDays||4} gun/hafta
+
+VUCUT ANALIZI:
+${analysisSummary}
+
+PROGRAM:
+${programSummary}
+
+ANTRENMAN GECMISI (son antrenmanlarda kullanilan agirliklar):
+${workoutSummary}
+
+ILERLEME OLCUMLERI:
+${progressSummary}
+
+BESLENME (bugun):
+${nutritionSummary}
+${weeklyNutrition}
+
+KURALLAR:
+- Generic konusma yasak — kullanicinin gercek verisini kullan
+- Plato varsa proaktif belirt ve somut cozum oner (agirlik artisi, rep degisimi, varyasyon, deload haftasi, tempo degisimi)
+- Ilerleme olcumlerini yorumla — kilo, bel, kol degisimlerine referans ver
+- O gunun programini ve ne yapmasi gerektigini teknik detayla anlat
+- Teknik kavramlari dogru ve yerinde kullan, gerektiginde kisaca acikla${wantsExerciseChange ? `
+
+EGZERSIZ DEGISIKLIGI:
+Kullanici bir hareketi degistirmek istiyor. Normal cevabinin SONUNA su JSON'u ekle:
+<program_update>
+{"dayIndex": 0, "exerciseIndex": 0, "newExercise": {"name": "Yeni Hareket", "sets": "4", "reps": "8-12", "rest": "90 sn", "intensity": "AGIR", "technique": "Teknik ipucu Turkce", "reason": "Neden bu hareket Turkce", "alternatives": ["Alt1", "Alt2"], "videoUrl": "https://youtube.com/results?search_query=exercise+tutorial"}}
+</program_update>
+dayIndex = kacinci gun (0=Gun1), exerciseIndex = o gundeki kacinci hareket (0=ilk).
+Once hangi gun ve hangi hareketi degistirmek istedigini anla, sonra uygun alternatif oner.` : ''}`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -692,7 +788,7 @@ app.post('/api/coach-chat', async (req, res) => {
 
     const aiResponse = await openai.chat.completions.create({
       model: 'gpt-4o',
-      max_tokens: 500,
+      max_tokens: 700,
       temperature: 0.7,
       messages,
     });
@@ -700,16 +796,32 @@ app.post('/api/coach-chat', async (req, res) => {
     const reply = aiResponse?.choices?.[0]?.message?.content;
     if (!reply) return res.status(500).json({ success: false, error: 'AI yanit vermedi.' });
 
-    console.log('Koc yanitladi');
-    res.json({ success: true, reply });
+    let updatedProgram = null;
+    const programUpdateMatch = reply.match(/<program_update>([\s\S]*?)<\/program_update>/);
+    const cleanReply = reply.replace(/<program_update>[\s\S]*?<\/program_update>/g, '').trim();
+
+    if (programUpdateMatch && activeProgram?.PROGRAM) {
+      try {
+        const update = JSON.parse(programUpdateMatch[1].trim());
+        if (activeProgram.PROGRAM[update.dayIndex]?.exercises?.[update.exerciseIndex]) {
+          updatedProgram = JSON.parse(JSON.stringify(activeProgram));
+          updatedProgram.PROGRAM[update.dayIndex].exercises[update.exerciseIndex] = {
+            ...updatedProgram.PROGRAM[update.dayIndex].exercises[update.exerciseIndex],
+            ...update.newExercise
+          };
+        }
+      } catch(e) { console.error('Program update error:', e.message); }
+    }
+
+    console.log('Koc yanitladi' + (updatedProgram ? ' + program guncellendi' : ''));
+    res.json({ success: true, reply: cleanReply, updatedProgram });
 
   } catch (err) {
-    console.error('Koc chat hatasi:', err.message);
+    console.error('Koc hatasi:', err.message);
     res.status(500).json({ success: false, error: 'Koc su an mesgul, tekrar dene.' });
   }
 });
 
-const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log('FitProg Backend: http://localhost:' + PORT);
 });
