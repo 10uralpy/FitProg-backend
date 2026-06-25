@@ -822,6 +822,72 @@ Once hangi gun ve hangi hareketi degistirmek istedigini anla, sonra uygun altern
   }
 });
 
+app.post('/api/analyze-progress-photos', async (req, res) => {
+  req.socket.setTimeout(60000);
+  res.setTimeout(60000);
+  try {
+    const { beforePhoto, afterPhoto, beforeDate, afterDate, profile, analysisData } = req.body;
+
+    if (!beforePhoto || !afterPhoto) {
+      return res.status(400).json({ success: false, error: 'İki fotoğraf gerekli' });
+    }
+
+    const muscleContext = analysisData?.muscleGroups
+      ? Object.entries(analysisData.muscleGroups)
+          .filter(([,v]) => v?.score != null)
+          .map(([k,v]) => `${k}: ${v.score}/100`)
+          .join(', ')
+      : '';
+
+    const prompt = `Sen deneyimli bir fitness kocusun. Kullanicinin iki farkli tarihteki vucut fotograflarini karsilastiriyorsun.
+
+FOTOGRAF 1 (BEFORE — ${beforeDate || 'onceki'}): soldaki/onceki fotograf
+FOTOGRAF 2 (AFTER — ${afterDate || 'sonraki'}): sagdaki/sonraki fotograf
+
+KULLANICI BILGISI:
+${profile?.age ? `Yas: ${profile.age} | Kilo: ${profile.weight}kg | Boy: ${profile.height}cm` : ''}
+Hedef: ${profile?.primaryGoal === 'muscle' ? 'Kas kazanma' : profile?.primaryGoal === 'lose' ? 'Yag yakma' : 'Formda kalma'}
+${muscleContext ? `Son analiz kas skorlari: ${muscleContext}` : ''}
+
+Gorsel degisimi analiz et ve su konularda samimi, kisisel ve motive edici bir yorum yaz:
+- Gozle gorulur fiziksel degisimler (kas gelisimi, vucut kompozisyonu, simetri vb.)
+- Hangi bolgelerde gozle gorulur ilerleme var?
+- Hangi bolgeler hala gelisim bekliyor?
+- Genel degerlendirme ve motivasyon
+
+Onemli:
+- Gercekci ol, abartma yapma
+- Spesifik ve kisisel konus, generic turk olmayan
+- Turkce yaz
+- 4-6 cumle yeterli`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 400,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: beforePhoto, detail: 'low' } },
+            { type: 'image_url', image_url: { url: afterPhoto, detail: 'low' } }
+          ]
+        }
+      ]
+    });
+
+    const result = response?.choices?.[0]?.message?.content;
+    if (!result) return res.status(500).json({ success: false, error: 'AI yanit vermedi.' });
+
+    console.log('Before/after analiz tamamlandi');
+    res.json({ success: true, result });
+
+  } catch (err) {
+    console.error('BA analiz hatasi:', err.message);
+    res.status(500).json({ success: false, error: 'Analiz yapılamadı, tekrar dene.' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log('FitProg Backend: http://localhost:' + PORT);
 });
